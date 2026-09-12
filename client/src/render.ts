@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {
-  buildCourse, trackPoint, groundAt, segmentAt, segIndexAt, halfWidthAt, lateral,
+  buildCourse, trackPoint, groundAt, segmentAt, halfWidthAt, lateral,
   SEG_LEN, F_KICKER, F_ROCKS, F_BOOST, F_NARROW, F_WHOOPS, F_DROP,
   type Course,
 } from './track';
@@ -63,7 +63,6 @@ export interface Scene {
 const MAX_RIGS = 8;
 const M_PER_FOOT = 0.3048; // the shared rig is authored in feet
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
-const lerp = (a: number, b: number, k: number) => a + (b - a) * k;
 const damp = (a: number, b: number, rate: number, dt: number) =>
   a + (b - a) * (1 - Math.exp(-rate * dt));
 
@@ -582,7 +581,6 @@ function wedgeGeometry(width: number, height: number, len: number): THREE.Buffer
 }
 
 function buildFeatures(c: Course, grp: THREE.Group) {
-  const rampMat = new THREE.MeshLambertMaterial({ color: 0x8a6b48 });
   const rockMat = new THREE.MeshLambertMaterial({ color: 0x55504a });
   const padMat = new THREE.MeshBasicMaterial({ color: 0x35e0ff, transparent: true, opacity: 0.75 });
   const gateMat = new THREE.MeshLambertMaterial({ color: 0xe8b020 });
@@ -632,7 +630,7 @@ function buildFeatures(c: Course, grp: THREE.Group) {
         const wp = trackPoint(c, ws, 0);
         const roll = new THREE.Mesh(
           new THREE.CylinderGeometry(0.5 * sg.featureArg, 0.5 * sg.featureArg, hw * 1.6, 6, 1, false, 0, Math.PI),
-          rampMat
+          new THREE.MeshLambertMaterial({ color: BIOME_LOOK[sg.biome].rock })
         );
         roll.rotation.z = Math.PI / 2;
         roll.rotation.y = -wp.heading;
@@ -640,7 +638,10 @@ function buildFeatures(c: Course, grp: THREE.Group) {
         grp.add(roll);
       }
     } else if (sg.feature === F_DROP) {
-      const lip = new THREE.Mesh(new THREE.BoxGeometry(hw * 2, 0.6, 1.4), rampMat);
+      const lip = new THREE.Mesh(
+        new THREE.BoxGeometry(hw * 2, 0.6, 1.4),
+        new THREE.MeshLambertMaterial({ color: BIOME_LOOK[sg.biome].rock })
+      );
       lip.position.set(p.x, p.y + 0.3, p.z);
       lip.rotation.y = Math.PI / 2 - p.heading;
       grp.add(lip);

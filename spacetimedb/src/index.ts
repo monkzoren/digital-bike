@@ -213,7 +213,12 @@ const BRAKE_ACCEL = 17;
 const DRAG_TUCK = 0.0045; // holding forward: tucked, slippery
 const DRAG_UPRIGHT = 0.0095; // sitting up: the air grabs you
 const OFFTRACK_ROLL = 0.95; // rough ground outside the corridor
-const CRASH_MARGIN = 7; // metres past the corridor before it is a crash
+// Going off the racing line is NOT a crash: the berm scrubs your speed and
+// noses you back onto the track, and only riding a long way out into the
+// scenery actually puts you down. (A tighter margin here cost a competent
+// test rider a crash every ten seconds.)
+const CRASH_MARGIN = 14; // metres past the corridor before it is a crash
+const BERM_PUSH = 0.75; // how hard the hillside noses you back on
 const BASE_TOP = 40; // reference top speed (m/s) before stats
 const GRIP_ACCEL = 1.15; // lateral g the tyres hold before they let go
 const STEER_RATE = 3.2; // rad/s of yaw authority at walking pace
@@ -926,7 +931,7 @@ function stepRider(
     if (r.boosting) a += BOOST_ACCEL * st.accel;
     const dragK = (inp.throttle > 0 ? DRAG_TUCK : DRAG_UPRIGHT) / (st.top * st.top) * (draft ? 0.72 : 1);
     a -= dragK * r.v * r.v;
-    a -= (b.roll + off * OFFTRACK_ROLL * 0.12) * r.v * 0.9 / st.weight;
+    a -= (b.roll + off * OFFTRACK_ROLL * 0.26) * r.v * 0.9 / st.weight;
 
     // --- steering, grip and slip ----------------------------------------
     // Steering authority falls away with speed: full lock at a crawl, a
@@ -965,6 +970,8 @@ function stepRider(
     const ds = r.v * Math.cos(r.yaw) * DT;
     r.s += ds;
     r.n += r.v * Math.sin(r.yaw) * DT + slide * DT;
+    // Off the track the hillside rises, so it pushes you back down onto it.
+    if (off > 0) r.n -= Math.sign(r.n) * Math.min(off * BERM_PUSH, 7) * DT;
     // Following the corner rotates the track under the rider.
     r.yaw -= seg.curv * ds;
     r.lean = lerp(r.lean, clamp(-lat / (G * 1.6), -0.85, 0.85), 0.25);
@@ -992,7 +999,7 @@ function stepRider(
         r.airTicks = 1;
       }
       // Flat out and sideways through whoops ends one way.
-      if (r.v > 32 && Math.abs(r.yaw) > 0.5) crash(r, effHalf);
+      if (r.v > 34 && Math.abs(r.yaw) > 0.55) crash(r, effHalf);
     }
   } else {
     // --- airborne ---------------------------------------------------------
@@ -1788,24 +1795,30 @@ export const race_tick = spacetimedb.reducer(
     // --- the gate ----------------------------------------------------------
     if (race.state === R_COUNTDOWN) {
       const left = race.startTicks - 1;
-      // The holeshot: the throttle pressed as the gate drops is worth a shove;
-      // pressed early it is a jump start, and it costs you the same shove and
-      // then some. (Tennis's serve toss, on a start line.)
-      if (left < ticks(3)) {
-        for (const p of riders) {
-          if (p.isBot || p.crashTicks > 0 || p.boost > 0) continue;
-          const pressed = (p.btn & BTN_HOP) !== 0 || p.dirY > 0;
-          if (!pressed) continue;
+      // The holeshot: the throttle pressed AS the gate drops is worth a shove;
+      // stabbed at it early it is a jump start, and costs you. It is the
+      // PRESS that is timed, not the holding — `hopTicks` remembers last
+      // tick's state, so a rider who simply holds the throttle through the
+      // countdown gets neither the shove nor the penalty.
+      for (const p of riders) {
+        if (p.isBot || p.crashTicks > 0) continue;
+        const pressed = (p.btn & BTN_HOP) !== 0 || p.dirY > 0;
+        const wasPressed = p.hopTicks > 0;
+        let row = p;
+        if (pressed && !wasPressed && p.boost === 0) {
           if (left <= ticks(0.35)) {
-            ctx.db.player.identity.update({ ...p, boost: 550, fxKind: FX_BOOSTPAD, fxTicks: FX_TICKS });
-          } else {
-            ctx.db.player.identity.update({ ...p, crashTicks: ticks(0.9), fxKind: FX_CRASH, fxTicks: FX_TICKS });
+            row = { ...row, boost: 550, fxKind: FX_BOOSTPAD, fxTicks: FX_TICKS };
+          } else if (left < ticks(2)) {
+            row = { ...row, crashTicks: ticks(0.9), fxKind: FX_CRASH, fxTicks: FX_TICKS };
           }
+        }
+        if (pressed !== wasPressed || row !== p) {
+          ctx.db.player.identity.update({ ...row, hopTicks: pressed ? 1 : 0 });
         }
       }
       if (left <= 0) {
         // Bots get their shove for free, scaled by how sharp they are.
-        for (const p of riders) {
+        for (const p of raceRiders(ctx, race.id)) {
           if (!p.isBot) continue;
           const prof = botProfileAt(p.botSkill === BOT_SKILL_UNSET ? lobbySkill(lobby) : p.botSkill);
           ctx.db.player.identity.update({ ...p, boost: Math.round(550 * prof.throttle * prof.boost) });

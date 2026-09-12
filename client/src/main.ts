@@ -3,10 +3,10 @@ import { DbConnection } from './module_bindings';
 import type { Identity } from 'spacetimedb';
 import {
   SPACETIMEDB_URI, DATABASE_NAME, TICK_HZ, BOOST_MAX, MAX_RIDERS,
-  BTN_HOP, BTN_TRICK, BTN_BOOST, TRICK_NAMES, CUP_POINTS,
-  M_RACE, M_CUP, L_OPEN, L_RUNNING, L_FINISHED, R_COUNTDOWN, R_LIVE, R_DONE,
+  BTN_HOP, BTN_TRICK, BTN_BOOST, TRICK_NAMES,
+  M_RACE, M_CUP, L_OPEN, L_FINISHED, R_COUNTDOWN, R_LIVE, R_DONE,
   FX_CRASH, FX_LAND_PERFECT, FX_TRICK, FX_BOOSTPAD, FX_KICKER,
-  totalXpFor, levelFor, LEVEL_MAX, MMR_START, kmh, raceClock,
+  totalXpFor, LEVEL_MAX, kmh, raceClock,
 } from './config';
 import {
   firebaseEnabled, initAuth, getToken, localToken, accountKind, accountLabel,
@@ -15,8 +15,7 @@ import {
   signOut,
 } from './auth';
 import {
-  initRenderer, drawScene, riderScreenPos, canvasCssSize, addShake,
-  initCharacterPreviews, registerPreviewSlot,
+  initRenderer, drawScene, riderScreenPos, initCharacterPreviews,
   type Scene, type RenderRider,
 } from './render';
 import { CHARACTERS } from './characters';
@@ -32,8 +31,8 @@ import {
   initAudio, resumeAudio, updateRide, playHop, playLand, playCrash,
   playBoost, playTrick, playBeep, playFinish,
 } from './audio';
-import { getGraphics, setGraphics, applyPreset, presetOf, RESOLUTIONS, FPS_CAPS, type GraphicsSettings } from './graphics';
-import { initTouch, setTouchVisible, touchDir, touchAvailable } from './touch';
+import { getGraphics, setGraphics, applyPreset, presetOf, RESOLUTIONS, FPS_CAPS } from './graphics';
+import { initTouch, setTouchVisible, touchDir } from './touch';
 
 // ---------------------------------------------------------------------------
 // DOM
@@ -186,8 +185,6 @@ async function connect() {
 // ---------------------------------------------------------------------------
 // Accounts
 // ---------------------------------------------------------------------------
-type AccountRow = ReturnType<typeof accountRows>[number];
-const accountRows = () => [...conn.db.account.iter()];
 const myAccount = () => (myIdentity ? conn.db.account.identity.find(myIdentity) : undefined);
 
 function statsOf(a: any | undefined): UnlockStats {
