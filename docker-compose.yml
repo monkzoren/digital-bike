@@ -6,7 +6,7 @@ services:
     # Pinned for reproducible deploys. Safe to bump: the JWT signing keys
     # live in the data volume (see --jwt-*-key-path below), so a new image
     # no longer re-keys token signing.
-    image: clockworklabs/spacetime:v2.8.3
+    image: clockworklabs/spacetime:v2.10.0
     # Run as root: Docker creates the /stdb volume mountpoint owned by root,
     # and the image's non-root user then cannot write it ("Permission denied
     # (os error 13) at /stdb/...") — which kills the DB as soon as it needs
