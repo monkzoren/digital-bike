@@ -213,13 +213,20 @@ const BRAKE_ACCEL = 17;
 const DRAG_TUCK = 0.0045; // holding forward: tucked, slippery
 const DRAG_UPRIGHT = 0.0095; // sitting up: the air grabs you
 const OFFTRACK_ROLL = 0.95; // rough ground outside the corridor
-const CRASH_MARGIN = 6; // metres past the corridor before it is a crash
+const CRASH_MARGIN = 7; // metres past the corridor before it is a crash
 const BASE_TOP = 40; // reference top speed (m/s) before stats
 const GRIP_ACCEL = 1.15; // lateral g the tyres hold before they let go
 const STEER_RATE = 3.2; // rad/s of yaw authority at walking pace
-const MAX_YAW = 1.0;
+// How far the bike may sit across its direction of travel. This is the
+// single most important handling number: the slip angle times the speed IS
+// the rate you cross the track, so a generous value at speed means a rider
+// holding the stick leaves the corridor in under a second.
+const MAX_YAW = 0.62;
 const YAW_DAMP = 2.6; // how hard the bike straightens itself out
-const AIR_PITCH_RATE = 2.4; // rad/s of nose control in the air
+const AIR_PITCH_RATE = 1.6; // rad/s of nose control in the air
+// The bike comes back level on its own, so a rider who simply holds the
+// throttle through a jump is not guaranteed to bury the nose and crash.
+const AIR_LEVEL_RATE = 1.5;
 const HOP_IMPULSE = 6.5;
 const KICK_IMPULSE = 9.0;
 const CRASH_TICKS = ticks(1.4);
@@ -238,8 +245,8 @@ const DRAFT_DIST = 14; // metres behind a rider where the air is free
 const DRAFT_FILL = 180;
 
 // Landing grade: how far the nose may be off the slope it lands on.
-const LAND_OK = 0.42;
-const LAND_BAD = 0.85;
+const LAND_OK = 0.55;
+const LAND_BAD = 1.15;
 
 // Tricks — held in the air with a direction. Each needs air time to land.
 const TRICK_NONE = 0;
@@ -922,10 +929,12 @@ function stepRider(
     a -= (b.roll + off * OFFTRACK_ROLL * 0.12) * r.v * 0.9 / st.weight;
 
     // --- steering, grip and slip ----------------------------------------
-    const speedFac = 1 / (1 + r.v / 15);
-    const wantYaw = inp.steer * MAX_YAW * (0.45 + 0.55 * speedFac);
+    // Steering authority falls away with speed: full lock at a crawl, a
+    // careful few degrees at 130 km/h.
+    const speedFac = 1 / (1 + r.v / 9);
+    const wantYaw = inp.steer * MAX_YAW * (0.18 + 0.82 * speedFac);
     const yawBefore = r.yaw;
-    const rate = STEER_RATE * (0.5 + 0.5 * speedFac);
+    const rate = STEER_RATE * (0.3 + 0.7 * speedFac);
     r.yaw += clamp(wantYaw - r.yaw, -rate * DT, rate * DT);
     // Self-centring: a bike left alone straightens up.
     if (Math.abs(inp.steer) < 0.05) r.yaw -= r.yaw * YAW_DAMP * DT;
@@ -942,7 +951,7 @@ function stepRider(
       const excess = Math.abs(lat) - gripLimit;
       r.slip = clamp(excess / (gripLimit + 1), 0, 1);
       // Understeer: the bike washes out toward the outside of the turn.
-      slide = -Math.sign(lat) * Math.min(excess * 0.045, 9);
+      slide = -Math.sign(lat) * Math.min(excess * 0.045, 5.5);
       a -= Math.min(excess * 0.09, 11);
       r.boost = Math.min(BOOST_MAX, r.boost + DRIFT_FILL * r.slip * DT);
     } else {
@@ -991,8 +1000,11 @@ function stepRider(
     r.vz -= G * phys.gravity * DT;
     r.z += r.vz * DT;
     r.slip = 0;
-    // Nose control: forward tips it down, back brings it up.
-    r.pitch = clamp(r.pitch - inp.throttle * AIR_PITCH_RATE * st.air * DT, -1.3, 1.1);
+    // Nose control: forward tips it down, back brings it up — over a
+    // self-levelling bias toward the slope the rider is about to land on.
+    const wantPitch = -segAt(segs, r.s + Math.max(12, r.v * 0.8)).pitch;
+    r.pitch += (wantPitch - r.pitch) * Math.min(1, AIR_LEVEL_RATE * DT);
+    r.pitch = clamp(r.pitch - inp.throttle * AIR_PITCH_RATE * st.air * DT, -0.9, 0.9);
     // Some steering authority in the air, but no grip and no turn.
     r.yaw += inp.steer * 0.9 * DT;
     r.lean = lerp(r.lean, inp.steer * 0.5, 0.12);
@@ -1118,7 +1130,24 @@ function botInput(r: Rider, course: CourseData, prof: BotProfile, st: RideStats,
   }
   // Racing line: sit toward the inside of the corner that is coming.
   const wobble = Math.sin((r.s + salt * 37) * 0.035) * prof.lineErr;
-  const lineTarget = clamp(Math.sign(worst) * here.halfWidth * 0.55 + wobble, -here.halfWidth * 0.85, here.halfWidth * 0.85);
+  let lineTarget = clamp(
+    Math.sign(worst) * here.halfWidth * 0.55 + wobble,
+    -here.halfWidth * 0.85,
+    here.halfWidth * 0.85
+  );
+  // Rocks: a bot that rides straight through a boulder field looks broken.
+  // Read one segment ahead and pick the wider side of the cluster; how far
+  // ahead it looks (and therefore whether it gets out of the way in time) is
+  // the skill dial again.
+  const rockSeg = segAt(segs, r.s + Math.min(prof.look, 70));
+  if (rockSeg.feature === F_ROCKS) {
+    const side = rockSeg.featureArg > 0 ? -1 : 1;
+    lineTarget = clamp(
+      rockSeg.featureArg + side * (4 + prof.lineErr),
+      -rockSeg.halfWidth * 0.9,
+      rockSeg.halfWidth * 0.9
+    );
+  }
   // Steer toward the target lateral position, allowing for current drift.
   const err = lineTarget - (r.n + r.v * Math.sin(r.yaw) * 0.6);
   let steer = clamp(err * 0.12 - r.yaw * 1.1, -1, 1);
@@ -1134,10 +1163,13 @@ function botInput(r: Rider, course: CourseData, prof: BotProfile, st: RideStats,
     steer = -r.yaw * 2;
   }
   const trick = r.airTicks > TRICK_MIN_AIR[TRICK_WHIP] && ((salt * 7 + Math.floor(r.s)) % 97) / 97 < prof.trick;
-  // Hop the lip: the error shrinks with skill.
+  // Hop the lip: the error shrinks with skill. A rock still in the way with
+  // no room to go round is jumped instead.
   const nextIdx = Math.floor((r.s + r.v * (prof.hopErr / TICK_HZ)) / SEG_LEN);
   const next = segs[clamp(nextIdx, 0, segs.length - 1)];
-  const hop = next.feature === F_KICKER && r.airTicks === 0;
+  const mustJump =
+    next.feature === F_ROCKS && Math.abs(r.n - next.featureArg) < 3 && prof.trick > 0.2;
+  const hop = (next.feature === F_KICKER || mustJump) && r.airTicks === 0;
   const boost = r.boost > 320 && prof.boost > 0.3 && r.airTicks === 0 && Math.abs(worst) < 0.006;
   return { steer, throttle, hop, trick, boost };
 }

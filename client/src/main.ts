@@ -392,6 +392,14 @@ const myLobby = () => {
   return p && p.lobbyId !== 0n ? conn.db.lobby.id.find(p.lobbyId) : undefined;
 };
 const lobbyPlayers = (lobbyId: bigint) => [...conn.db.player.byLobby.filter(lobbyId)];
+const lobbyRaces = (lobbyId: bigint) => [...conn.db.race.byLobby.filter(lobbyId)];
+/** The pause between cup legs: the next gate is up but not counting down yet. */
+function isCupIntermission(lobby: any, race: any): boolean {
+  return (
+    !!lobby && lobby.mode === M_CUP && !!race &&
+    race.state === R_COUNTDOWN && race.startTicks > TICK_HZ * 4
+  );
+}
 const myRace = () => {
   const p = myPlayer();
   return p && p.raceId !== 0n ? conn.db.race.id.find(p.raceId) : undefined;
@@ -1082,6 +1090,20 @@ function frame(now: number) {
       renderResults(race);
       goTo('results');
     }
+  } else if (isCupIntermission(lobby, race)) {
+    // A cup leg that ends rolls straight into the next gate. Hold the
+    // standings up for the intermission rather than blinking past them.
+    const prev = lobbyRaces(lobby.id)
+      .filter(r => r.state === R_DONE)
+      .sort((a, b) => Number(b.id - a.id))[0];
+    if (prev) {
+      if (resultsShownFor !== prev.id) {
+        resultsShownFor = prev.id;
+        playFinish();
+        renderResults(prev);
+      }
+      if (screenName !== 'results') goTo('results');
+    }
   } else if (lobby.status === L_OPEN && screenName !== 'waiting') {
     goTo('waiting');
   }
@@ -1226,7 +1248,7 @@ function renderHud(race: any, me: any, riders: RenderRider[]) {
   if (race.state === R_COUNTDOWN) {
     const secs = Math.ceil(race.startTicks / TICK_HZ);
     show(cd, true);
-    cd.textContent = secs > 12 ? 'NEXT HILL' : secs > 0 ? String(secs) : 'GO!';
+    cd.textContent = secs > 4 ? `NEXT HILL · ${secs - 3}` : secs > 0 ? String(secs) : 'GO!';
     if (secs !== lastCountdownBeep && secs <= 3) {
       lastCountdownBeep = secs;
       playBeep(secs === 0);
