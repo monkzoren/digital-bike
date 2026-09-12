@@ -3,9 +3,10 @@ import { DbConnection } from './module_bindings';
 import type { Identity } from 'spacetimedb';
 import {
   SPACETIMEDB_URI, DATABASE_NAME, TICK_HZ, BOOST_MAX, MAX_RIDERS,
-  BTN_HOP, BTN_TRICK, BTN_BOOST, TRICK_NAMES,
+  BTN_HOP, BTN_TRICK, BTN_BOOST, TRICK_NAMES, DRIFT_TIERS, DRIFT_TIER_COLORS,
   M_RACE, M_CUP, L_OPEN, L_FINISHED, R_COUNTDOWN, R_LIVE, R_DONE,
   FX_CRASH, FX_LAND_PERFECT, FX_TRICK, FX_BOOSTPAD, FX_KICKER,
+  FX_MINI_TURBO, FX_GRIND, FX_BONK,
   totalXpFor, LEVEL_MAX, kmh, raceClock,
 } from './config';
 import {
@@ -734,13 +735,21 @@ const KEY_UP = ['w', 'arrowup'];
 const KEY_DOWN = ['s', 'arrowdown'];
 const has = (list: string[]) => list.some(k => keys.has(k));
 
-function readInput(): { x: number; y: number; btn: number } {
+// Steering is ANALOG: x is a percentage (-100..100), not a direction. A
+// racer needs shallow corrections, and a three-state stick can only ever ask
+// for full lock. On the keyboard the lock ramps in over a moment, which gives
+// a key-tap the same fine control a stick has.
+const STEER_RAMP = 4.2; // units of lock per second held
+let steerPos = 0;
+
+function readInput(dt: number): { x: number; y: number; btn: number } {
   let x = 0;
   let y = 0;
   let btn = 0;
+  let keyed = 0;
   if (!chatOpen) {
-    if (has(KEY_LEFT)) x -= 1;
-    if (has(KEY_RIGHT)) x += 1;
+    if (has(KEY_LEFT)) keyed -= 1;
+    if (has(KEY_RIGHT)) keyed += 1;
     if (has(KEY_UP)) y += 1;
     if (has(KEY_DOWN)) y -= 1;
     if (keys.has(' ') || keys.has('j')) btn |= BTN_HOP;
@@ -750,22 +759,36 @@ function readInput(): { x: number; y: number; btn: number } {
   // Touch stick overrides when it is being held.
   const [tx, ty] = touchDir();
   if (tx !== 0 || ty !== 0) {
-    x = tx;
+    keyed = tx;
     y = ty;
   }
   btn |= touchButtons;
-  // Gamepad: left stick + face buttons.
+
+  // Held keys ramp toward full lock and spring back when released.
+  if (keyed !== 0) {
+    steerPos += keyed * STEER_RAMP * dt;
+    if (keyed * steerPos < 0) steerPos = keyed * 0.15; // reverse: snap through centre
+  } else {
+    steerPos -= Math.sign(steerPos) * Math.min(Math.abs(steerPos), STEER_RAMP * 1.6 * dt);
+  }
+  steerPos = Math.max(-1, Math.min(1, steerPos));
+  x = steerPos;
+
+  // Gamepad: the stick is genuinely analog, so take it as it comes.
   const pad = navigator.getGamepads?.().find(p => p && p.connected);
   if (pad) {
     const ax = pad.axes[0] ?? 0;
     const ay = pad.axes[1] ?? 0;
-    if (Math.abs(ax) > 0.35) x = Math.sign(ax);
+    if (Math.abs(ax) > 0.12) {
+      x = ax;
+      steerPos = ax;
+    }
     if (Math.abs(ay) > 0.35) y = -Math.sign(ay);
     if (pad.buttons[0]?.pressed) btn |= BTN_HOP;
     if (pad.buttons[1]?.pressed) btn |= BTN_TRICK;
     if (pad.buttons[2]?.pressed || pad.buttons[7]?.pressed) btn |= BTN_BOOST;
   }
-  return { x, y, btn };
+  return { x: Math.round(x * 100), y, btn };
 }
 
 let touchButtons = 0;
@@ -775,14 +798,17 @@ initTouch({
   },
 });
 
-function sendInput() {
+function sendInput(dt: number) {
   if (!subscribed) return;
-  const { x, y, btn } = readInput();
-  if (x === lastDirX && y === lastDirY && btn === lastBtn) return;
-  lastDirX = x;
+  const { x, y, btn } = readInput(dt);
+  // Steering is a percentage now, so quantise what goes on the wire: a
+  // one-percent wobble is not worth a row write to every subscriber.
+  const qx = Math.round(x / 5) * 5;
+  if (qx === lastDirX && y === lastDirY && btn === lastBtn) return;
+  lastDirX = qx;
   lastDirY = y;
   lastBtn = btn;
-  conn.reducers.setInput({ dirX: x, dirY: y, btn });
+  conn.reducers.setInput({ dirX: qx, dirY: y, btn });
 }
 
 window.addEventListener('keydown', e => {
@@ -1034,6 +1060,7 @@ let trickTimer = 0;
 let lastFx = 0;
 let fpsSamples: number[] = [];
 let lastFrameAt = 0;
+let lastInputAt = 0;
 
 function riderRows(raceId: bigint) {
   return [...conn.db.player.byRace.filter(raceId)].filter(p => !p.spectator);
@@ -1049,6 +1076,8 @@ function toRenderRider(p: any): RenderRider {
     pitch: p.pitch, lean: p.lean, slip: p.slip,
     airTicks: p.airTicks, crashTicks: p.crashTicks,
     trickKind: p.trickKind, trickSpin: p.trickSpin,
+    driftDir: p.driftDir, driftCharge: p.driftCharge,
+    grinding: p.grindTicks > 0,
     boosting: p.boosting,
     place: p.place,
     isLocal: p.identity.toHexString() === myHex(),
@@ -1067,7 +1096,8 @@ function frame(now: number) {
   lastFrameAt = now;
 
   if (!subscribed) return;
-  sendInput();
+  sendInput(Math.min(0.1, (now - (lastInputAt || now)) / 1000));
+  lastInputAt = now;
 
   const lobby = myLobby();
   const race = myRace();
@@ -1212,9 +1242,24 @@ function renderHud(race: any, me: any, riders: RenderRider[]) {
       : '';
 
   ($('speed-plate').querySelector('.v') as HTMLElement).textContent = String(kmh(me.v));
-  const boostPct = (me.boost / BOOST_MAX) * 100;
-  ($('boost-bar').firstElementChild as HTMLElement).style.width = `${boostPct}%`;
-  $('boost-wrap').classList.toggle('full', me.boost >= BOOST_MAX * 0.98);
+  const bar = $('boost-bar').firstElementChild as HTMLElement;
+  const wrap = $('boost-wrap');
+  if (me.driftDir !== 0) {
+    // Mid-slide the gauge shows the mini-turbo building instead: blue,
+    // orange, purple — let go on the colour you want.
+    const tier =
+      me.driftCharge >= DRIFT_TIERS[2] ? 3 : me.driftCharge >= DRIFT_TIERS[1] ? 2 : me.driftCharge >= DRIFT_TIERS[0] ? 1 : 0;
+    const span = DRIFT_TIERS[2] * 1.05;
+    bar.style.width = `${Math.min(100, (me.driftCharge / span) * 100)}%`;
+    bar.style.background = tier > 0 ? DRIFT_TIER_COLORS[tier - 1] : 'rgba(140,160,255,0.5)';
+    (wrap.querySelector('.lbl') as HTMLElement).textContent = tier > 0 ? `DRIFT · TIER ${tier}` : 'DRIFT';
+    wrap.classList.toggle('full', tier >= 3);
+  } else {
+    bar.style.width = `${(me.boost / BOOST_MAX) * 100}%`;
+    bar.style.background = 'linear-gradient(90deg, #0d7bd0, var(--cyan))';
+    (wrap.querySelector('.lbl') as HTMLElement).textContent = 'BOOST';
+    wrap.classList.toggle('full', me.boost >= BOOST_MAX * 0.98);
+  }
 
   // Standings tower
   const st = $('standings');

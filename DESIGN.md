@@ -59,6 +59,32 @@ quality; bike makes it decide the *hop off a lip*, the *holeshot* on the start
 lights, and the *landing angle*. Same "press at the right instant, be rewarded"
 loop, same `swingTicks`-style press window on the server.
 
+### Handling: tight, not loose
+
+The bike goes where you point it. The rider's steering is clamped to the turn
+the tyres actually have left once the corner itself has taken its share, so it
+can never ask for more grip than it has and **never slides around underneath
+you**. A slide is something you ask for.
+
+Steering is **analog** (a percentage on the wire, not a direction): a stick
+gives shallow corrections directly, and on the keyboard the lock ramps in as
+you hold, so a tap is a nudge and a hold is full lock.
+
+### The drift
+
+Hold **HOP** with the bars turned and the bike hangs the tail out: it rotates
+far tighter than grip allows and charges a **mini-turbo** — blue, orange,
+purple on the boost gauge — which you cash by **releasing the button**. The
+drift ends on release, never on the stick crossing centre, so it is a
+commitment rather than a twitch. Most of the slip angle is the tail hanging
+out; only a fraction carries you across the track.
+
+Two numbers decide whether drifting is worth doing: how tight a corner grip
+alone can take (`GRIP_ACCEL`), and what the turbo pays against what the slide
+costs. Measured over full laps: drifting the corners that want it is ~3 s a
+lap faster than never drifting, and drifting *everything* is ~5 s slower than
+that. The mechanic rewards judgement, which is the point.
+
 ### Speed economy
 - Gravity does the work: steeper = faster. The course slope is the throttle.
 - **Tuck** cuts drag; **brake** scrubs; cornering scrubs with the square of
@@ -67,9 +93,12 @@ loop, same `swingTicks`-style press window on the server.
   and *fills the boost meter* — rally logic: give up speed now to buy it back.
 - **Boost meter** (0–1000) fills from drift, clean landings, landed tricks and
   drafting; spending it raises both acceleration and top speed.
-- **Crash** (hit an obstacle, land sideways, leave the track corridor) costs
-  ~1.4 s and most of your speed. Crashing is the only real punishment, so the
-  risk dial is always "how close to a crash am I willing to ride".
+- **Knocks vs crashes.** Most contact **bonks** you — slowed, spun, still
+  riding: trunks across the track, baled corners, a clipped boulder, an ugly
+  landing. Only two things put you on the floor for ~1.4 s: a boulder taken at
+  pace, and bailing out of a trick you committed to. Both are chosen. (Before
+  this split, twelve of every fourteen crashes in a measured lap were ordinary
+  landings — a racer that keeps stopping is not a racer.)
 
 ### Air and tricks
 Kickers, drops and crests launch you. In the air there is no grip: you pick a
@@ -80,6 +109,14 @@ sloppy scrubs, bad crashes. Big air is a bet.
 
 ### Courses and environments
 Six biomes, each with its own grip, roughness, visual kit and hazards:
+
+### Track furniture
+
+Kickers to time · whoops that buck you · gates that pinch · boost pads ·
+boulders to read or hop · standing water that takes your grip · trunks lying
+**across** the track to jump · trunks lying **along** it to **grind** (they
+hold your line, push you along and pay boost) · baled corners you can throw
+the bike at.
 
 | # | Biome | Grip | Feel |
 |---|---|---|---|

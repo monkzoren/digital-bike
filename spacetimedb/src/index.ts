@@ -53,22 +53,25 @@ interface Biome {
   kicker: number; // per-segment feature odds
   rocks: number;
   whoops: number;
+  log: number; // grindable trunks
+  logx: number; // trunks across the track
+  puddle: number;
 }
 
 // Mirrored in client/src/track.ts (BIOMES) — keep in sync.
 const BIOMES: Biome[] = [
-  // ALPINE — wide, fast, slidey snow above the treeline
-  { grip: 0.72, roll: 0.10, curv: 0.0060, width: 15, rough: 0.35, kicker: 0.22, rocks: 0.06, whoops: 0.05 },
-  // FOREST — tight pine singletrack, high grip, no room for mistakes
-  { grip: 1.02, roll: 0.13, curv: 0.0135, width: 8, rough: 0.45, kicker: 0.10, rocks: 0.20, whoops: 0.08 },
+  // ALPINE — wide, fast, snow above the treeline; timber piled at the edges
+  { grip: 0.86, roll: 0.10, curv: 0.0060, width: 15, rough: 0.35, kicker: 0.20, rocks: 0.05, whoops: 0.05, log: 0.07, logx: 0.05, puddle: 0.02 },
+  // FOREST — pine singletrack: felled trunks everywhere, to grind or to hop
+  { grip: 1.06, roll: 0.13, curv: 0.0135, width: 9, rough: 0.45, kicker: 0.10, rocks: 0.13, whoops: 0.07, log: 0.16, logx: 0.12, puddle: 0.05 },
   // CANYON — red rock rally road, big banked sweepers and drops
-  { grip: 0.88, roll: 0.12, curv: 0.0085, width: 13, rough: 0.40, kicker: 0.20, rocks: 0.12, whoops: 0.06 },
+  { grip: 0.96, roll: 0.12, curv: 0.0085, width: 13, rough: 0.40, kicker: 0.18, rocks: 0.10, whoops: 0.06, log: 0.05, logx: 0.05, puddle: 0.03 },
   // MUD — rain-soaked switchbacks, the loosest surface on the mountain
-  { grip: 0.62, roll: 0.20, curv: 0.0120, width: 10, rough: 0.55, kicker: 0.08, rocks: 0.10, whoops: 0.14 },
+  { grip: 0.74, roll: 0.20, curv: 0.0120, width: 10, rough: 0.55, kicker: 0.08, rocks: 0.08, whoops: 0.12, log: 0.10, logx: 0.09, puddle: 0.22 },
   // DUNES — desert sand, rollers and whoops, the sand drags at you
-  { grip: 0.76, roll: 0.26, curv: 0.0070, width: 16, rough: 0.60, kicker: 0.16, rocks: 0.05, whoops: 0.26 },
+  { grip: 0.88, roll: 0.26, curv: 0.0070, width: 16, rough: 0.60, kicker: 0.16, rocks: 0.05, whoops: 0.22, log: 0.04, logx: 0.04, puddle: 0.02 },
   // VILLAGE — cobbles and tarmac, the flat-out run to the line
-  { grip: 1.10, roll: 0.08, curv: 0.0095, width: 9, rough: 0.20, kicker: 0.12, rocks: 0.08, whoops: 0.04 },
+  { grip: 1.18, roll: 0.08, curv: 0.0095, width: 9, rough: 0.20, kicker: 0.12, rocks: 0.06, whoops: 0.04, log: 0.06, logx: 0.06, puddle: 0.06 },
 ];
 
 // Segment features.
@@ -79,6 +82,10 @@ const F_ROCKS = 3; // point obstacles at featureArg lateral offset
 const F_DROP = 4; // the ground falls away — free air, land it straight
 const F_NARROW = 5; // a gate: the corridor pinches
 const F_BOOST = 6; // a boost pad on the racing line
+const F_LOG = 7; // a felled trunk lying ALONG the track: ride it, grind it
+const F_LOGX = 8; // trunks lying ACROSS the track: hop them or get bonked
+const F_PUDDLE = 9; // standing water / deep mud: grip and speed both go
+const F_BALES = 10; // bales lining the corridor: they bounce you back in
 
 interface Segment {
   curv: number; // rad/m, + = left
@@ -161,26 +168,46 @@ function buildCourse(courseId: number, seed: number): Segment[] {
     let feature = F_NONE;
     let featureArg = 0;
     if (i > 2 && i < c.segs - 2) {
+      // One roll, walked through the biome's weights in a fixed order, so
+      // the same seed lays out the same hill on both sides of the wire.
       const r = rng();
       const dens = 0.85 + c.difficulty * 0.2;
-      if (r < b.kicker * dens) {
+      let acc = 0;
+      const take = (w: number) => {
+        acc += w * dens;
+        return r < acc;
+      };
+      if (take(b.kicker)) {
         feature = F_KICKER;
         featureArg = 0.7 + rng() * 0.75; // ramp strength
-      } else if (r < (b.kicker + b.rocks) * dens) {
+      } else if (take(b.rocks)) {
         feature = F_ROCKS;
         featureArg = (rng() * 2 - 1) * halfWidth * 0.75;
-      } else if (r < (b.kicker + b.rocks + b.whoops) * dens) {
+      } else if (take(b.whoops)) {
         feature = F_WHOOPS;
         featureArg = 0.6 + rng() * 0.7;
-      } else if (r < (b.kicker + b.rocks + b.whoops) * dens + 0.05) {
+      } else if (take(b.log)) {
+        // A trunk down the fall line — a rail to grind if you can get on it.
+        feature = F_LOG;
+        featureArg = (rng() * 2 - 1) * halfWidth * 0.55;
+      } else if (take(b.logx)) {
+        feature = F_LOGX;
+        featureArg = 0.6 + rng() * 0.6; // how tall the trunk sits
+      } else if (take(b.puddle)) {
+        feature = F_PUDDLE;
+        featureArg = (rng() * 2 - 1) * halfWidth * 0.5;
+      } else if (take(0.05)) {
         feature = F_DROP;
         featureArg = 0.8 + rng() * 0.9;
-      } else if (r < (b.kicker + b.rocks + b.whoops) * dens + 0.09) {
+      } else if (take(0.04)) {
         feature = F_NARROW;
         featureArg = 0.45 + rng() * 0.2;
-      } else if (r < (b.kicker + b.rocks + b.whoops) * dens + 0.13) {
+      } else if (take(0.05)) {
         feature = F_BOOST;
         featureArg = (rng() * 2 - 1) * halfWidth * 0.5;
+      } else if (take(0.05)) {
+        feature = F_BALES;
+        featureArg = 1;
       }
     }
     if (feature === F_NARROW) featureArg = clamp(featureArg, 0.4, 0.7);
@@ -220,18 +247,24 @@ const OFFTRACK_ROLL = 0.95; // rough ground outside the corridor
 const CRASH_MARGIN = 14; // metres past the corridor before it is a crash
 const BERM_PUSH = 0.75; // how hard the hillside noses you back on
 const BASE_TOP = 40; // reference top speed (m/s) before stats
-const GRIP_ACCEL = 1.15; // lateral g the tyres hold before they let go
-const STEER_RATE = 3.2; // rad/s of yaw authority at walking pace
-// How far the bike may sit across its direction of travel. This is the
-// single most important handling number: the slip angle times the speed IS
-// the rate you cross the track, so a generous value at speed means a rider
-// holding the stick leaves the corridor in under a second.
-const MAX_YAW = 0.62;
-const YAW_DAMP = 2.6; // how hard the bike straightens itself out
-const AIR_PITCH_RATE = 1.6; // rad/s of nose control in the air
-// The bike comes back level on its own, so a rider who simply holds the
-// throttle through a jump is not guaranteed to bury the nose and crash.
-const AIR_LEVEL_RATE = 1.5;
+// Lateral g the tyres hold. This sets how tight a corner can be taken on
+// grip alone — and therefore whether the drift has a job. Set it too high and
+// every corner is a steering corner, the mini-turbo is a tax, and drifting is
+// measurably slower than not bothering (it was). Set here so the fast, tight
+// corners genuinely want a drift and the open ones do not.
+const GRIP_ACCEL = 1.05;
+const STEER_RATE = 3.4; // rad/s of yaw authority
+// How far the bike may sit across its direction of travel. The slip angle
+// times the speed IS the rate you cross the track, so this is the single
+// most important handling number: small and responsive reads as TIGHT, big
+// and slow reads as loose. Steering is analog, so a light touch asks for a
+// fraction of this and the bike holds a line.
+const MAX_YAW = 0.30;
+const YAW_DAMP = 5.0; // how hard the bike straightens itself out
+const AIR_PITCH_RATE = 1.3; // rad/s of nose control in the air
+// The bike rights itself strongly, the way an arcade racer's does: the rider
+// is aiming for a GOOD landing, never fighting to avoid a disastrous one.
+const AIR_LEVEL_RATE = 3.2;
 const HOP_IMPULSE = 6.5;
 const KICK_IMPULSE = 9.0;
 const CRASH_TICKS = ticks(1.4);
@@ -248,6 +281,44 @@ const HOP_WINDOW = ticks(0.5); // how long a hop press stays armed
 const PERFECT_HOP = ticks(0.2); // press this close to the lip for a perfect pop
 const DRAFT_DIST = 14; // metres behind a rider where the air is free
 const DRAFT_FILL = 180;
+
+// ---------------------------------------------------------------------------
+// The DRIFT. Hold HOP with the bars turned and the bike breaks traction on
+// purpose: it rotates far tighter than grip allows, scrubs speed, and charges
+// a mini-turbo you cash in by letting go. This is the trick that makes an
+// arcade racer feel tight rather than floaty — the slide is something you ASK
+// for, never something the physics does to you.
+// ---------------------------------------------------------------------------
+const DRIFT_MIN_SPEED = 11; // too slow to break traction
+const DRIFT_STEER = 0.35; // how hard the bars must be turned to commit
+const DRIFT_YAW = 0.42; // extra slip angle held through the slide
+// …of which only this share actually carries you ACROSS the track. The rest
+// is the tail hanging out: the drama, and the extra rotation. Without the
+// split, a second of full-lock drift crossed the whole corridor and the
+// slide became a way to fall off the mountain rather than to corner.
+const DRIFT_SLIP_SHARE = 0.4;
+const DRIFT_TURN = 2.2; // how much tighter than grip a drift may rotate
+// Measured: with a heavier scrub and a smaller payout, drifting was a second
+// a corner SLOWER than just steering — which makes the whole mechanic a trap.
+// The cost of a drift is the commitment (you are locked into one direction
+// and cannot re-aim), not a speed tax.
+const DRIFT_SCRUB = 1.1; // m/s² paid for the privilege
+const DRIFT_CHARGE = 900; // charge per second at full commitment
+const DRIFT_TIERS = [360, 780, 1350]; // blue · orange · purple
+const MINI_TURBO = [0, 300, 540, 860]; // boost meter paid out per tier
+const DRIFT_KICK = [0, 2.4, 4.2, 6.4]; // and an instant shove, m/s
+
+// Grinding a felled trunk: a rail. Stay on it and it pays boost and holds
+// your speed through a corner nothing else can be taken at.
+const GRIND_FILL = 430; // boost per second on the rail
+const GRIND_PUSH = 2.6; // m/s² along it — a trunk is smoother than the hill
+const GRIND_SNAP = 1.6; // how far off the trunk you may be and still land it
+const GRIND_OFF_BONUS = 180; // boost for hopping off cleanly
+
+// A BONK is not a crash: you are bounced, slowed and spun a little, and you
+// keep riding. Bales, trunks across the track and glancing knocks use it.
+const BONK_TICKS = ticks(0.34);
+const BONK_KEEP = 0.62;
 
 // Landing grade: how far the nose may be off the slope it lands on.
 const LAND_OK = 0.55;
@@ -275,6 +346,10 @@ const FX_LAND_OK = 3;
 const FX_TRICK = 4;
 const FX_BOOSTPAD = 5;
 const FX_KICKER = 6;
+const FX_MINI_TURBO = 7;
+const FX_GRIND = 8;
+const FX_BONK = 9;
+const FX_SPLASH = 10;
 const FX_TICKS = ticks(0.6);
 
 // ---------------------------------------------------------------------------
@@ -593,6 +668,12 @@ const Player = table(
     // Per-race accumulators, read once when the race pays out.
     topV: t.f32().default(0), // fastest speed reached this race (m/s)
     tricksDone: t.u16().default(0),
+    // NOTE: appended columns — the drift and the rail. driftDir is the side
+    // the bike is hung out (0 = not drifting), driftCharge the mini-turbo
+    // building up, grindTicks how long the current trunk has been ridden.
+    driftDir: t.i8().default(0),
+    driftCharge: t.u16().default(0),
+    grindTicks: t.u16().default(0),
   }
 );
 
@@ -845,6 +926,7 @@ type Rider = {
   pitch: number; lean: number; boost: number; boosting: boolean;
   airTicks: number; crashTicks: number; trickKind: number; trickSpin: number;
   slip: number; hopTicks: number; fxKind: number; fxTicks: number;
+  driftDir: number; driftCharge: number; grindTicks: number;
   tricks: number; // landed this tick (counted into the account)
 };
 
@@ -855,8 +937,25 @@ function setFx(r: Rider, kind: number) {
 
 // A crash costs time and speed, and puts you back on the track: left where
 // you went off, a rider outside the corridor simply crashes again, forever.
+// A knock, not a crash: you are slowed, spun a little, and ride on. Anything
+// you could plausibly bounce off — bales, a trunk across the track, a glancing
+// rock — uses this instead of putting you on the floor.
+function bonk(r: Rider, pushN = 0) {
+  r.v *= BONK_KEEP;
+  r.crashTicks = Math.max(r.crashTicks, BONK_TICKS);
+  r.yaw *= 0.3;
+  r.driftDir = 0;
+  r.driftCharge = 0;
+  r.grindTicks = 0;
+  if (pushN !== 0) r.n += pushN;
+  setFx(r, FX_BONK);
+}
+
 function crash(r: Rider, half = 0) {
   r.crashTicks = CRASH_TICKS;
+  r.driftDir = 0;
+  r.driftCharge = 0;
+  r.grindTicks = 0;
   if (half > 0) r.n = clamp(r.n, -half * 0.7, half * 0.7);
   r.v *= CRASH_SPEED_KEEP;
   r.boost = 0;
@@ -903,6 +1002,12 @@ function stepRider(
   const grounded = r.airTicks === 0;
   const effHalf = seg.feature === F_NARROW ? seg.halfWidth * seg.featureArg : seg.halfWidth;
   const off = Math.max(0, Math.abs(r.n) - effHalf);
+  // Standing water: both grip and speed go, and it is avoidable — the
+  // puddle sits at a known place across the track, so read it and go round.
+  const puddle = grounded && seg.feature === F_PUDDLE && Math.abs(r.n - seg.featureArg) < 3.6;
+  // Riding a felled trunk down the fall line.
+  const onLog =
+    grounded && seg.feature === F_LOG && Math.abs(r.n - seg.featureArg) < GRIND_SNAP && r.v > 7;
   const topSpeed = BASE_TOP * st.top * phys.speed + (r.boosting ? BOOST_TOP : 0);
 
   // --- boost meter -------------------------------------------------------
@@ -931,45 +1036,123 @@ function stepRider(
     if (r.boosting) a += BOOST_ACCEL * st.accel;
     const dragK = (inp.throttle > 0 ? DRAG_TUCK : DRAG_UPRIGHT) / (st.top * st.top) * (draft ? 0.72 : 1);
     a -= dragK * r.v * r.v;
-    a -= (b.roll + off * OFFTRACK_ROLL * 0.26) * r.v * 0.9 / st.weight;
+    a -= (b.roll + off * OFFTRACK_ROLL * 0.26 + (puddle ? 0.55 : 0)) * r.v * 0.9 / st.weight;
 
-    // --- steering, grip and slip ----------------------------------------
-    // Steering authority falls away with speed: full lock at a crawl, a
-    // careful few degrees at 130 km/h.
-    const speedFac = 1 / (1 + r.v / 9);
-    const wantYaw = inp.steer * MAX_YAW * (0.18 + 0.82 * speedFac);
-    const yawBefore = r.yaw;
-    const rate = STEER_RATE * (0.3 + 0.7 * speedFac);
-    r.yaw += clamp(wantYaw - r.yaw, -rate * DT, rate * DT);
-    // Self-centring: a bike left alone straightens up.
-    if (Math.abs(inp.steer) < 0.05) r.yaw -= r.yaw * YAW_DAMP * DT;
+    // --- the rail ---------------------------------------------------------
+    if (onLog) {
+      r.grindTicks++;
+      r.driftDir = 0;
+      r.driftCharge = 0;
+      a += GRIND_PUSH;
+      r.boost = Math.min(BOOST_MAX, r.boost + GRIND_FILL * DT);
+      if (r.grindTicks === 3) setFx(r, FX_GRIND);
+    } else if (r.grindTicks > 0) {
+      // Stepped off the trunk. Doing it deliberately — with a hop — is worth
+      // something; sliding off the side is not.
+      if (inp.hop && r.grindTicks > ticks(0.35)) {
+        r.boost = Math.min(BOOST_MAX, r.boost + GRIND_OFF_BONUS);
+        r.vz = HOP_IMPULSE * 0.5 * st.air;
+        r.airTicks = 1;
+      }
+      r.grindTicks = 0;
+    }
 
-    // The tyres must generate the lateral acceleration of the path the rider
-    // is asking for: their own rotation plus the corner the track is turning.
-    const worldTurn = (r.yaw - yawBefore) / DT + seg.curv * r.v;
-    const lat = r.v * worldTurn;
+    // --- steering, grip and the drift -------------------------------------
     const braking = inp.throttle < -0.2;
+    const surfaceGrip = puddle ? 0.55 : off > 0 ? 0.6 : 1;
     const gripLimit =
-      b.grip * st.grip * phys.grip * GRIP_ACCEL * G * (off > 0 ? 0.55 : 1) * (braking ? 0.78 : 1);
+      b.grip * st.grip * phys.grip * GRIP_ACCEL * G * surfaceGrip * (braking ? 0.85 : 1);
+
+    // --- commit to a slide, or come out of one ----------------------------
+    const wantsDrift = inp.hop && Math.abs(inp.steer) > DRIFT_STEER && r.v > DRIFT_MIN_SPEED;
+    if (r.driftDir === 0 && wantsDrift && r.grindTicks === 0) {
+      r.driftDir = Math.sign(inp.steer);
+      r.driftCharge = 0;
+    } else if (r.driftDir !== 0) {
+      // A drift ends when you LET GO, not when the stick crosses centre.
+      // Cancelling on a steering wobble meant a rider paid for the slide over
+      // and over and never lived long enough in it to collect — which made
+      // drifting measurably slower than simply steering. Inside a drift the
+      // stick modulates the angle; the button is what commits you.
+      const aligned = Math.sign(inp.steer) === r.driftDir ? Math.abs(inp.steer) : 0;
+      const holding = inp.hop && r.v > DRIFT_MIN_SPEED * 0.6 && r.airTicks === 0;
+      if (holding) {
+        // Charge scales with how hard you are committed and how fast you are.
+        r.driftCharge += DRIFT_CHARGE * (0.45 + 0.55 * aligned) * Math.min(1, r.v / 26) * DT;
+      } else {
+        // Let go and cash it in: the longer the slide, the bigger the shove.
+        let tier = 0;
+        for (let i = DRIFT_TIERS.length - 1; i >= 0; i--) {
+          if (r.driftCharge >= DRIFT_TIERS[i]) {
+            tier = i + 1;
+            break;
+          }
+        }
+        if (tier > 0) {
+          r.boost = Math.min(BOOST_MAX, r.boost + MINI_TURBO[tier]);
+          r.v += DRIFT_KICK[tier];
+          setFx(r, FX_MINI_TURBO);
+        }
+        r.driftDir = 0;
+        r.driftCharge = 0;
+      }
+    }
+    const drifting = r.driftDir !== 0;
+    // Holding the button with the bars straight is not a drift, it is a
+    // rider who forgot to let go: ease the bike back upright.
+    if (drifting && Math.abs(inp.steer) < 0.1) {
+      r.driftCharge = Math.max(0, r.driftCharge - DRIFT_CHARGE * 0.8 * DT);
+    }
+
+    // How much of a turn the tyres can actually give, once the corner itself
+    // has taken its share. Clamping the rider's input to THIS is what makes
+    // the bike feel tight: it simply cannot ask for more than it has, so it
+    // never slides around underneath you — unless you asked it to.
+    const trackTurn = seg.curv * r.v;
+    const turnBudget = Math.max(0.25, gripLimit / Math.max(7, r.v) - Math.abs(trackTurn));
+    const rate = Math.min(STEER_RATE, turnBudget * (drifting ? DRIFT_TURN : 1));
+
+    const wantYaw = inp.steer * MAX_YAW + (drifting ? r.driftDir * DRIFT_YAW : 0);
+    const yawBefore = r.yaw;
+    r.yaw += clamp(wantYaw - r.yaw, -rate * DT, rate * DT);
+    // Self-centring, in proportion to how little you are asking for.
+    r.yaw -= r.yaw * YAW_DAMP * (1 - Math.min(1, Math.abs(inp.steer))) * DT;
+    r.yaw = clamp(r.yaw, -MAX_YAW - DRIFT_YAW, MAX_YAW + DRIFT_YAW);
+
+    // The corner is still the corner: carry too much speed into one the tyres
+    // cannot hold and you wash wide, exactly as before.
+    const lat = r.v * ((r.yaw - yawBefore) / DT + trackTurn);
     let slide = 0;
     if (Math.abs(lat) > gripLimit) {
       const excess = Math.abs(lat) - gripLimit;
       r.slip = clamp(excess / (gripLimit + 1), 0, 1);
-      // Understeer: the bike washes out toward the outside of the turn.
-      slide = -Math.sign(lat) * Math.min(excess * 0.045, 5.5);
-      a -= Math.min(excess * 0.09, 11);
-      r.boost = Math.min(BOOST_MAX, r.boost + DRIFT_FILL * r.slip * DT);
+      slide = -Math.sign(lat) * Math.min(excess * 0.05, 6);
+      a -= Math.min(excess * 0.08, 10);
     } else {
-      r.slip = Math.max(0, r.slip - 3 * DT);
-      a -= Math.abs(lat) * 0.06;
+      r.slip = Math.max(0, r.slip - 4 * DT);
+      a -= Math.abs(lat) * 0.05;
+    }
+    if (drifting) {
+      r.slip = Math.max(r.slip, 0.55 + 0.45 * Math.min(1, r.driftCharge / DRIFT_TIERS[1]));
+      a -= DRIFT_SCRUB;
     }
 
     r.v = clamp(r.v + a * DT, 0, topSpeed * 1.15);
 
     // --- advance along and across the track ------------------------------
-    const ds = r.v * Math.cos(r.yaw) * DT;
+    // The bike travels along a shallower angle than it is pointing: most of a
+    // drift's slip angle is the tail hanging out, not the line changing.
+    const travelYaw = drifting
+      ? r.yaw - r.driftDir * DRIFT_YAW * (1 - DRIFT_SLIP_SHARE)
+      : r.yaw;
+    const ds = r.v * Math.cos(travelYaw) * DT;
     r.s += ds;
-    r.n += r.v * Math.sin(r.yaw) * DT + slide * DT;
+    r.n += r.v * Math.sin(travelYaw) * DT + slide * DT;
+    // A trunk holds you in its groove: you may ease along it, not wander off.
+    if (onLog) {
+      r.n += (seg.featureArg - r.n) * Math.min(1, 9 * DT);
+      r.yaw *= 0.55;
+    }
     // Off the track the hillside rises, so it pushes you back down onto it.
     if (off > 0) r.n -= Math.sign(r.n) * Math.min(off * BERM_PUSH, 7) * DT;
     // Following the corner rotates the track under the rider.
@@ -985,8 +1168,8 @@ function stepRider(
       r.airTicks = 1;
     }
 
-    // The wheels stay on the hill.
-    r.z = groundAt(course, r.s);
+    // The wheels stay on the hill — or on top of the trunk.
+    r.z = groundAt(course, r.s) + (onLog ? 0.75 : 0);
 
     // --- rough ground and whoops ------------------------------------------
     if (seg.feature === F_WHOOPS) {
@@ -1041,6 +1224,7 @@ function stepRider(
       r.vz = 0;
       let err = Math.abs(r.pitch + lseg.pitch) + Math.abs(r.yaw) * 0.55;
       // A trick pays only if it was finished before the wheels touched.
+      let bailed = false;
       if (r.trickKind !== TRICK_NONE) {
         const done = r.airTicks >= TRICK_MIN_AIR[r.trickKind] && r.trickSpin >= 0.55;
         if (done) {
@@ -1050,12 +1234,19 @@ function stepRider(
           setFx(r, FX_TRICK);
         } else {
           err += 0.7; // bailed out of it — that is a bad landing
+          bailed = true;
         }
         r.trickKind = TRICK_NONE;
         r.trickSpin = 0;
       }
       // Heavy bikes land heavy. A hop off a kerb is not a trophy: the payout
-      // (and the punishment) scale with how long you were actually up there.
+      // scales with how long you were actually up there.
+      //
+      // An ORDINARY landing never puts you on the floor, however ugly it is —
+      // it costs speed. Measuring a lap showed twelve of fourteen crashes
+      // were landings, which is a racer that stops being a racer. The one way
+      // a jump still wrecks you is bailing out of a trick you committed to:
+      // that is a risk you chose, with a payout attached.
       const tol = 1 / st.weight;
       if (hang < 0.25) {
         // barely left the ground — no grade, no payout
@@ -1067,10 +1258,17 @@ function stepRider(
         r.boost = Math.min(BOOST_MAX, r.boost + LAND_PERFECT * Math.min(1.6, hang));
         if (r.fxKind !== FX_TRICK) setFx(r, FX_LAND_PERFECT);
       } else if (err * tol < LAND_BAD) {
-        r.v *= 0.9;
+        r.v *= 0.92;
         if (r.fxKind !== FX_TRICK) setFx(r, FX_LAND_OK);
-      } else {
+      } else if (bailed && hang > 0.6) {
         crash(r, lseg.feature === F_NARROW ? lseg.halfWidth * lseg.featureArg : lseg.halfWidth);
+        return;
+      } else {
+        // Landed badly: most of the speed gone and a wobble, but riding.
+        r.v *= 0.72;
+        bonk(r);
+        r.airTicks = 0;
+        r.pitch = -lseg.pitch;
         return;
       }
       r.airTicks = 0;
@@ -1103,16 +1301,32 @@ function stepRider(
       setFx(r, FX_BOOSTPAD);
     } else if (ns.feature === F_ROCKS && r.airTicks === 0) {
       if (Math.abs(r.n - ns.featureArg) < 2.3) {
-        crash(r, ns.halfWidth);
-        return;
+        // A boulder at speed puts you down; clip one slowly and you bounce.
+        if (r.v > 18) {
+          crash(r, ns.halfWidth);
+          return;
+        }
+        bonk(r, Math.sign(r.n - ns.featureArg) * 1.5);
       }
+    } else if (ns.feature === F_LOGX && r.airTicks === 0) {
+      // Trunks lying across the track: hop them, or wear them.
+      bonk(r);
+    } else if (ns.feature === F_PUDDLE && Math.abs(r.n - ns.featureArg) < 3.6 && r.airTicks === 0) {
+      setFx(r, FX_SPLASH);
     }
   }
 
   // --- the corridor --------------------------------------------------------
   const outSeg = segs[idxAfter];
   const outHalf = outSeg.feature === F_NARROW ? outSeg.halfWidth * outSeg.featureArg : outSeg.halfWidth;
-  if (Math.abs(r.n) > outHalf + CRASH_MARGIN) {
+  if (outSeg.feature === F_BALES && Math.abs(r.n) > outHalf && r.airTicks === 0) {
+    // A wall of bales: it bounces you back onto the track and costs you a
+    // little speed, which is a far better lesson than lying in the snow.
+    r.n = Math.sign(r.n) * outHalf * 0.92;
+    r.yaw = -r.yaw * 0.4;
+    r.v *= 0.86;
+    setFx(r, FX_BONK);
+  } else if (Math.abs(r.n) > outHalf + CRASH_MARGIN) {
     crash(r, outHalf);
   }
 }
@@ -1142,18 +1356,23 @@ function botInput(r: Rider, course: CourseData, prof: BotProfile, st: RideStats,
     -here.halfWidth * 0.85,
     here.halfWidth * 0.85
   );
-  // Rocks: a bot that rides straight through a boulder field looks broken.
+  // Trunks across the track and standing water are read the same way as
+  // rocks: go round what you can, hop what you cannot.
   // Read one segment ahead and pick the wider side of the cluster; how far
   // ahead it looks (and therefore whether it gets out of the way in time) is
   // the skill dial again.
   const rockSeg = segAt(segs, r.s + Math.min(prof.look, 70));
-  if (rockSeg.feature === F_ROCKS) {
+  if (rockSeg.feature === F_ROCKS || rockSeg.feature === F_PUDDLE) {
     const side = rockSeg.featureArg > 0 ? -1 : 1;
+    const clear = rockSeg.feature === F_PUDDLE ? 5.5 : 4;
     lineTarget = clamp(
-      rockSeg.featureArg + side * (4 + prof.lineErr),
+      rockSeg.featureArg + side * (clear + prof.lineErr),
       -rockSeg.halfWidth * 0.9,
       rockSeg.halfWidth * 0.9
     );
+  } else if (rockSeg.feature === F_LOG && prof.trick > 0.35) {
+    // A sharp bot will get up on the trunk and ride it.
+    lineTarget = rockSeg.featureArg;
   }
   // Steer toward the target lateral position, allowing for current drift.
   const err = lineTarget - (r.n + r.v * Math.sin(r.yaw) * 0.6);
@@ -1175,8 +1394,18 @@ function botInput(r: Rider, course: CourseData, prof: BotProfile, st: RideStats,
   const nextIdx = Math.floor((r.s + r.v * (prof.hopErr / TICK_HZ)) / SEG_LEN);
   const next = segs[clamp(nextIdx, 0, segs.length - 1)];
   const mustJump =
-    next.feature === F_ROCKS && Math.abs(r.n - next.featureArg) < 3 && prof.trick > 0.2;
-  const hop = (next.feature === F_KICKER || mustJump) && r.airTicks === 0;
+    (next.feature === F_ROCKS && Math.abs(r.n - next.featureArg) < 3 && prof.trick > 0.2) ||
+    next.feature === F_LOGX;
+  // Drifting: a bot commits to the slide through a corner it is entering
+  // hard, and lets go on the way out — the same mini-turbo a player gets.
+  const wantDrift =
+    prof.brake > 0.45 &&
+    r.v > DRIFT_MIN_SPEED * 1.6 &&
+    Math.abs(worst) > 0.0065 &&
+    worstAt < prof.look * 0.75 &&
+    Math.sign(steer) === Math.sign(worst) &&
+    Math.abs(steer) > DRIFT_STEER;
+  const hop = ((next.feature === F_KICKER || mustJump) && r.airTicks === 0) || wantDrift;
   const boost = r.boost > 320 && prof.boost > 0.3 && r.airTicks === 0 && Math.abs(worst) < 0.006;
   return { steer, throttle, hop, trick, boost };
 }
@@ -1259,6 +1488,9 @@ function gateRider(p: PlayerRow, slot: number, count: number, course: CourseData
     ready: false,
     topV: 0,
     tricksDone: 0,
+    driftDir: 0,
+    driftCharge: 0,
+    grindTicks: 0,
   };
 }
 
@@ -1322,7 +1554,7 @@ function insertBot(ctx: Ctx, lobby: LobbyRow, slot: number): PlayerRow {
     fxKind: 0, fxTicks: 0,
     online: true, isBot: true, spectator: false, ready: true, kicked: false,
     botSkill: clamp(Math.round(lobbySkill(lobby) + (rng() - 0.5) * 16), 0, BOT_HARD),
-    topV: 0, tricksDone: 0,
+    topV: 0, tricksDone: 0, driftDir: 0, driftCharge: 0, grindTicks: 0,
   };
   return existing ? ctx.db.player.identity.update(row) : ctx.db.player.insert(row);
 }
@@ -1855,7 +2087,9 @@ export const race_tick = spacetimedb.reducer(
         pitch: p.pitch, lean: p.lean, boost: p.boost, boosting: p.boosting,
         airTicks: p.airTicks, crashTicks: p.crashTicks,
         trickKind: p.trickKind, trickSpin: p.trickSpin, slip: p.slip,
-        hopTicks: p.hopTicks, fxKind: p.fxKind, fxTicks: p.fxTicks, tricks: 0,
+        hopTicks: p.hopTicks, fxKind: p.fxKind, fxTicks: p.fxTicks,
+        driftDir: p.driftDir, driftCharge: p.driftCharge, grindTicks: p.grindTicks,
+        tricks: 0,
       };
 
       // Drafting: sitting in the hole another rider punches in the air.
@@ -1878,7 +2112,7 @@ export const race_tick = spacetimedb.reducer(
             p.characterId * 31 + p.bikeId * 7 + p.name.length
           )
         : {
-            steer: clamp(p.dirX, -1, 1),
+            steer: clamp(p.dirX / 100, -1, 1),
             throttle: clamp(p.dirY, -1, 1),
             hop: (p.btn & BTN_HOP) !== 0,
             trick: (p.btn & BTN_TRICK) !== 0,
@@ -1918,6 +2152,9 @@ export const race_tick = spacetimedb.reducer(
         finishTicks,
         topV: Math.max(p.topV, r.v),
         tricksDone: Math.min(65535, p.tricksDone + r.tricks),
+        driftDir: clamp(Math.round(r.driftDir), -1, 1),
+        driftCharge: clamp(Math.round(r.driftCharge), 0, 65535),
+        grindTicks: clamp(Math.round(r.grindTicks), 0, 65535),
       });
     }
 
@@ -2229,12 +2466,15 @@ export const set_character = spacetimedb.reducer(
 // ---------------------------------------------------------------------------
 // Input. Clients send held direction + a button bitmask; nothing else.
 // ---------------------------------------------------------------------------
+// dirX is STEERING, sent as a percentage (-100..100), not a direction: a
+// racer lives or dies on being able to ask for a shallow correction, and a
+// three-state stick can only ever ask for full lock. dirY stays a direction.
 export const set_input = spacetimedb.reducer(
   { dirX: t.i8(), dirY: t.i8(), btn: t.u8() },
   (ctx, { dirX, dirY, btn }) => {
     const player = ctx.db.player.identity.find(ctx.sender);
     if (!player) return;
-    const x = clamp(dirX, -1, 1);
+    const x = clamp(dirX, -100, 100);
     const y = clamp(dirY, -1, 1);
     const b = btn & (BTN_HOP | BTN_TRICK | BTN_BOOST);
     if (player.dirX === x && player.dirY === y && player.btn === b) return; // no-op writes cost broadcast
@@ -2424,6 +2664,7 @@ export const onConnect = spacetimedb.clientConnected(ctx => {
       fxKind: 0, fxTicks: 0,
       online: true, isBot: false, spectator: false, ready: false, kicked: false,
       botSkill: BOT_SKILL_UNSET, topV: 0, tricksDone: 0,
+      driftDir: 0, driftCharge: 0, grindTicks: 0,
     });
     return;
   }

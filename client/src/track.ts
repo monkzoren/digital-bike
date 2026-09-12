@@ -23,15 +23,18 @@ export interface Biome {
   kicker: number;
   rocks: number;
   whoops: number;
+  log: number;
+  logx: number;
+  puddle: number;
 }
 
 export const BIOMES: Biome[] = [
-  { grip: 0.72, roll: 0.10, curv: 0.0060, width: 15, rough: 0.35, kicker: 0.22, rocks: 0.06, whoops: 0.05 },
-  { grip: 1.02, roll: 0.13, curv: 0.0135, width: 8, rough: 0.45, kicker: 0.10, rocks: 0.20, whoops: 0.08 },
-  { grip: 0.88, roll: 0.12, curv: 0.0085, width: 13, rough: 0.40, kicker: 0.20, rocks: 0.12, whoops: 0.06 },
-  { grip: 0.62, roll: 0.20, curv: 0.0120, width: 10, rough: 0.55, kicker: 0.08, rocks: 0.10, whoops: 0.14 },
-  { grip: 0.76, roll: 0.26, curv: 0.0070, width: 16, rough: 0.60, kicker: 0.16, rocks: 0.05, whoops: 0.26 },
-  { grip: 1.10, roll: 0.08, curv: 0.0095, width: 9, rough: 0.20, kicker: 0.12, rocks: 0.08, whoops: 0.04 },
+  { grip: 0.86, roll: 0.10, curv: 0.0060, width: 15, rough: 0.35, kicker: 0.20, rocks: 0.05, whoops: 0.05, log: 0.07, logx: 0.05, puddle: 0.02 },
+  { grip: 1.06, roll: 0.13, curv: 0.0135, width: 9, rough: 0.45, kicker: 0.10, rocks: 0.13, whoops: 0.07, log: 0.16, logx: 0.12, puddle: 0.05 },
+  { grip: 0.96, roll: 0.12, curv: 0.0085, width: 13, rough: 0.40, kicker: 0.18, rocks: 0.10, whoops: 0.06, log: 0.05, logx: 0.05, puddle: 0.03 },
+  { grip: 0.74, roll: 0.20, curv: 0.0120, width: 10, rough: 0.55, kicker: 0.08, rocks: 0.08, whoops: 0.12, log: 0.10, logx: 0.09, puddle: 0.22 },
+  { grip: 0.88, roll: 0.26, curv: 0.0070, width: 16, rough: 0.60, kicker: 0.16, rocks: 0.05, whoops: 0.22, log: 0.04, logx: 0.04, puddle: 0.02 },
+  { grip: 1.18, roll: 0.08, curv: 0.0095, width: 9, rough: 0.20, kicker: 0.12, rocks: 0.06, whoops: 0.04, log: 0.06, logx: 0.06, puddle: 0.06 },
 ];
 
 export const F_NONE = 0;
@@ -41,6 +44,10 @@ export const F_ROCKS = 3;
 export const F_DROP = 4;
 export const F_NARROW = 5;
 export const F_BOOST = 6;
+export const F_LOG = 7; // a felled trunk lying ALONG the track: ride it, grind it
+export const F_LOGX = 8; // trunks lying ACROSS the track: hop them
+export const F_PUDDLE = 9; // standing water / deep mud
+export const F_BALES = 10; // bales lining the corridor
 
 export interface Segment {
   curv: number;
@@ -110,26 +117,45 @@ export function buildSegments(courseId: number, seed: number): Segment[] {
     let feature = F_NONE;
     let featureArg = 0;
     if (i > 2 && i < c.segs - 2) {
+      // One roll, walked through the biome's weights in a fixed order — the
+      // module does exactly this, in exactly this order.
       const r = rng();
       const dens = 0.85 + c.difficulty * 0.2;
-      if (r < b.kicker * dens) {
+      let acc = 0;
+      const take = (w: number) => {
+        acc += w * dens;
+        return r < acc;
+      };
+      if (take(b.kicker)) {
         feature = F_KICKER;
         featureArg = 0.7 + rng() * 0.75;
-      } else if (r < (b.kicker + b.rocks) * dens) {
+      } else if (take(b.rocks)) {
         feature = F_ROCKS;
         featureArg = (rng() * 2 - 1) * halfWidth * 0.75;
-      } else if (r < (b.kicker + b.rocks + b.whoops) * dens) {
+      } else if (take(b.whoops)) {
         feature = F_WHOOPS;
         featureArg = 0.6 + rng() * 0.7;
-      } else if (r < (b.kicker + b.rocks + b.whoops) * dens + 0.05) {
+      } else if (take(b.log)) {
+        feature = F_LOG;
+        featureArg = (rng() * 2 - 1) * halfWidth * 0.55;
+      } else if (take(b.logx)) {
+        feature = F_LOGX;
+        featureArg = 0.6 + rng() * 0.6;
+      } else if (take(b.puddle)) {
+        feature = F_PUDDLE;
+        featureArg = (rng() * 2 - 1) * halfWidth * 0.5;
+      } else if (take(0.05)) {
         feature = F_DROP;
         featureArg = 0.8 + rng() * 0.9;
-      } else if (r < (b.kicker + b.rocks + b.whoops) * dens + 0.09) {
+      } else if (take(0.04)) {
         feature = F_NARROW;
         featureArg = 0.45 + rng() * 0.2;
-      } else if (r < (b.kicker + b.rocks + b.whoops) * dens + 0.13) {
+      } else if (take(0.05)) {
         feature = F_BOOST;
         featureArg = (rng() * 2 - 1) * halfWidth * 0.5;
+      } else if (take(0.05)) {
+        feature = F_BALES;
+        featureArg = 1;
       }
     }
     if (feature === F_NARROW) featureArg = clamp(featureArg, 0.4, 0.7);

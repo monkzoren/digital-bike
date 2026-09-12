@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import {
   buildCourse, trackPoint, groundAt, segmentAt, halfWidthAt, lateral,
   SEG_LEN, F_KICKER, F_ROCKS, F_BOOST, F_NARROW, F_WHOOPS, F_DROP,
+  F_LOG, F_LOGX, F_PUDDLE, F_BALES,
   type Course,
 } from './track';
 import { BIOME_LOOK } from './courses';
@@ -12,7 +13,11 @@ import {
   type PlayerRig, type Pose,
 } from './rig';
 import { getGraphics, onGraphicsChange, type GraphicsSettings } from './graphics';
-import { FX_CRASH, FX_LAND_PERFECT, FX_TRICK, FX_BOOSTPAD, FX_KICKER } from './config';
+import { DRIFT_TIERS } from './config';
+import {
+  FX_CRASH, FX_LAND_PERFECT, FX_TRICK, FX_BOOSTPAD, FX_KICKER,
+  FX_MINI_TURBO, FX_GRIND, FX_BONK, FX_SPLASH,
+} from './config';
 
 // ---------------------------------------------------------------------------
 // The downhill renderer (Three.js / WebGL).
@@ -44,6 +49,9 @@ export interface RenderRider {
   crashTicks: number;
   trickKind: number;
   trickSpin: number;
+  driftDir: number;
+  driftCharge: number;
+  grinding: boolean;
   boosting: boolean;
   place: number;
   isLocal: boolean;
@@ -61,6 +69,8 @@ export interface Scene {
 }
 
 const MAX_RIGS = 8;
+// Drift-charge spark colours, tier 1..3 — mirrors DRIFT_TIER_COLORS.
+const SPARK_COLORS = [0x35c8ff, 0xffa023, 0xc46bff];
 const M_PER_FOOT = 0.3048; // the shared rig is authored in feet
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 const damp = (a: number, b: number, rate: number, dt: number) =>
@@ -637,6 +647,72 @@ function buildFeatures(c: Course, grp: THREE.Group) {
         roll.position.set(wp.x, wp.y, wp.z);
         grp.add(roll);
       }
+    } else if (sg.feature === F_LOG) {
+      // A felled trunk down the fall line — the rail. Drawn proud of the
+      // hill with bark rings at each end so it reads as rideable, not as a
+      // wall: you are meant to want to get on this.
+      const barkMat = new THREE.MeshLambertMaterial({ color: 0x6b4a2c });
+      const endMat = new THREE.MeshLambertMaterial({ color: 0xc9a273 });
+      const steps = 4;
+      for (let k = 0; k < steps; k++) {
+        const ls = s + (k * SEG_LEN) / steps;
+        const lp = trackPoint(c, ls, sg.featureArg);
+        const trunk = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.62, 0.62, SEG_LEN / steps + 0.2, 7),
+          barkMat
+        );
+        trunk.rotation.z = Math.PI / 2;
+        trunk.rotation.y = -lp.heading;
+        trunk.position.set(lp.x, lp.y + 0.6, lp.z);
+        trunk.castShadow = true;
+        grp.add(trunk);
+      }
+      for (const endS of [s, s + SEG_LEN]) {
+        const ep = trackPoint(c, Math.min(c.length, endS), sg.featureArg);
+        const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.64, 0.64, 0.12, 7), endMat);
+        cap.rotation.z = Math.PI / 2;
+        cap.rotation.y = -ep.heading;
+        cap.position.set(ep.x, ep.y + 0.6, ep.z);
+        grp.add(cap);
+      }
+    } else if (sg.feature === F_LOGX) {
+      // Trunks lying across the track: hop them or wear them.
+      const barkMat = new THREE.MeshLambertMaterial({ color: 0x5a3d24 });
+      const h = 0.55 * sg.featureArg;
+      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(h, h, hw * 1.9, 7), barkMat);
+      trunk.rotation.x = Math.PI / 2;
+      trunk.rotation.y = -p.heading + Math.PI / 2;
+      trunk.position.set(p.x, p.y + h, p.z);
+      trunk.castShadow = true;
+      grp.add(trunk);
+    } else if (sg.feature === F_PUDDLE) {
+      const water = new THREE.Mesh(
+        new THREE.CircleGeometry(4.2, 14),
+        new THREE.MeshLambertMaterial({ color: 0x2c4356, transparent: true, opacity: 0.85 })
+      );
+      water.rotation.x = -Math.PI / 2;
+      water.position.set(p.x + nx * sg.featureArg, p.y + 0.06, p.z + nz * sg.featureArg);
+      grp.add(water);
+    } else if (sg.feature === F_BALES) {
+      // Bales down both edges — the corridor is padded here, so this is the
+      // place to throw the bike at a corner.
+      const baleMat = new THREE.MeshLambertMaterial({ color: 0xd9b559 });
+      for (let k = 0; k < 5; k++) {
+        const bs = s + (k * SEG_LEN) / 5;
+        const bp = trackPoint(c, bs, 0);
+        const bl = lateral(bp.heading);
+        for (const sgn of [-1, 1]) {
+          const bale = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.1, 2.2), baleMat);
+          bale.position.set(
+            bp.x + bl.x * halfWidthAt(c, bs) * sgn,
+            bp.y + 0.55,
+            bp.z + bl.z * halfWidthAt(c, bs) * sgn
+          );
+          bale.rotation.y = Math.PI / 2 - bp.heading;
+          bale.castShadow = true;
+          grp.add(bale);
+        }
+      }
     } else if (sg.feature === F_DROP) {
       const lip = new THREE.Mesh(
         new THREE.BoxGeometry(hw * 2, 0.6, 1.4),
@@ -871,7 +947,10 @@ export function drawScene(scene: Scene) {
 
     const crashing = r.crashTicks > 0;
     const airborne = r.airTicks > 0;
-    vis.tilt.rotation.z = crashing ? Math.sin(now / 70) * 0.8 : vis.lean;
+    // A drift hangs the bike out sideways — the single clearest read that the
+    // slide is deliberate and charging.
+    const driftLean = r.driftDir * (0.35 + 0.2 * Math.min(1, r.driftCharge / 1600));
+    vis.tilt.rotation.z = crashing ? Math.sin(now / 70) * 0.8 : vis.lean + driftLean;
     vis.tilt.rotation.x = crashing ? 0.5 : -vis.pitch;
 
     // Trick rotation spins the whole bike + rider.
@@ -885,7 +964,7 @@ export function drawScene(scene: Scene) {
     vis.spin += (r.v / WHEEL_R) * dt;
     vis.bike.frontWheel.rotation.x = vis.spin;
     vis.bike.rearWheel.rotation.x = vis.spin;
-    vis.bike.fork.rotation.y = clamp(r.yaw * 0.8, -0.6, 0.6);
+    vis.bike.fork.rotation.y = clamp(r.yaw * 0.8 + r.driftDir * 0.25, -0.7, 0.7);
     vis.bike.group.visible = !crashing || Math.floor(now / 90) % 2 === 0;
 
     // Pose
@@ -899,18 +978,27 @@ export function drawScene(scene: Scene) {
     // always zero — the group carries the heading.
     applyPose(vis.rig, pose, 14, dt, 0, now);
 
-    // Dust: tyres always kick a little, a drift kicks a lot.
+    // Dust: tyres always kick a little, a drift kicks a lot — and once the
+    // mini-turbo is charging, the dust turns into coloured sparks that say
+    // exactly how much is banked.
     if (!airborne && r.v > 4) {
       const look = BIOME_LOOK[segmentAt(c, r.s).biome];
-      const rate = 0.05 + r.slip * 0.35;
+      const rate = 0.05 + r.slip * 0.35 + (r.driftDir !== 0 ? 0.45 : 0);
       if (Math.random() < rate) {
+        const tier =
+          r.driftCharge >= DRIFT_TIERS[2] ? 3 : r.driftCharge >= DRIFT_TIERS[1] ? 2 : r.driftCharge >= DRIFT_TIERS[0] ? 1 : 0;
+        const color = tier === 0 ? look.ground2 : SPARK_COLORS[tier - 1];
         spawnPuff(
           new THREE.Vector3(p.x, vis.z + 0.2, p.z),
-          look.ground2,
+          color,
           1.2 + r.slip * 5,
-          0.45 + r.slip * 0.5
+          tier > 0 ? 0.3 : 0.45 + r.slip * 0.5
         );
       }
+    }
+    // Grinding throws splinters up off the trunk.
+    if (r.grinding && Math.random() < 0.4) {
+      spawnPuff(new THREE.Vector3(p.x, vis.z + 0.5, p.z), 0xc9a273, 2.2, 0.35);
     }
 
     // One-shot cues from the server.
@@ -925,6 +1013,16 @@ export function drawScene(scene: Scene) {
         if (r.isLocal && r.fxKind === FX_LAND_PERFECT) addShake(0.25);
       } else if (r.fxKind === FX_BOOSTPAD || r.fxKind === FX_TRICK) {
         for (let i = 0; i < 5; i++) spawnPuff(at, 0x35e0ff, 3, 0.45);
+      } else if (r.fxKind === FX_MINI_TURBO) {
+        for (let i = 0; i < 10; i++) spawnPuff(at, 0xffa023, 5, 0.5);
+        if (r.isLocal) addShake(0.35);
+      } else if (r.fxKind === FX_BONK) {
+        for (let i = 0; i < 4; i++) spawnPuff(at, 0xbfae92, 3.5, 0.4);
+        if (r.isLocal) addShake(0.4);
+      } else if (r.fxKind === FX_SPLASH) {
+        for (let i = 0; i < 7; i++) spawnPuff(at, 0x7fb2d9, 4, 0.45);
+      } else if (r.fxKind === FX_GRIND) {
+        for (let i = 0; i < 4; i++) spawnPuff(at, 0xc9a273, 2.5, 0.4);
       }
     }
     // Boosting leaves a trail.
@@ -944,19 +1042,32 @@ export function drawScene(scene: Scene) {
     const back = scene.chase ? 8.5 + Math.min(4.5, target.v * 0.14) : 11;
     const height = scene.chase ? 4.4 + Math.min(2.0, target.v * 0.04) : 5.5;
     camS = damp(camS, Math.max(0, target.s - back), 9, dt);
-    camN = damp(camN, target.n * 0.55, 5, dt);
+    // Sit behind where the rider actually IS, not where the centreline is —
+    // a drift moves them across the track fast, and a camera that lags the
+    // line loses them out of frame exactly when the action is.
+    camN = damp(camN, target.n * 0.85, 7, dt);
     const cp = trackPoint(c, camS, camN);
     const groundY = groundAt(c, camS);
     camHeight = damp(camHeight, Math.max(target.z, groundY) + height, 7, dt);
     camera.position.set(cp.x, camHeight, cp.z);
-    // Look at the hill the rider is dropping into, not at their head: on a
-    // descent the ground ahead falls away, and aiming at rider height fills
-    // the screen with sky.
-    const ahead = trackPoint(c, Math.min(c.length, target.s + 26), target.n * 0.5);
+
+    // Aim between the rider and the hill they are dropping into: at the rider
+    // alone the screen fills with sky on a descent, at the hill alone the
+    // rider slides out of shot mid-drift.
+    const ridePt = trackPoint(c, target.s, target.n);
+    // Look down the rider's OWN line, not back at the centreline: aiming at
+    // the middle of the track swung the camera away from a rider who was
+    // drifting wide, which is exactly when you need to see them.
+    const ahead = trackPoint(c, Math.min(c.length, target.s + 26), target.n);
+    const k = 0.68;
+    const lookX = ridePt.x + (ahead.x - ridePt.x) * k;
+    const lookZ = ridePt.z + (ahead.z - ridePt.z) * k;
     const lookY = Math.min(target.z + 1.2, ahead.y + 3.4);
-    camera.up.set(Math.sin(camRoll) * 0.5, 1, 0);
-    camera.lookAt(ahead.x, lookY, ahead.z);
-    camRoll = damp(camRoll, -target.lean * 0.35 - target.yaw * 0.12, 6, dt);
+    camera.up.set(0, 1, 0);
+    camera.lookAt(lookX, lookY, lookZ);
+    // A hint of roll for drama — a hint. Rolling with the full lean turned
+    // every slide into a horizon that fell over.
+    camRoll = damp(camRoll, clamp(-target.lean * 0.12 - target.yaw * 0.08, -0.1, 0.1), 6, dt);
     camera.rotation.z += camRoll;
     const wantFov = 52 + Math.min(14, target.v * 0.35) + (target.boosting ? 6 : 0);
     camFov = damp(camFov, wantFov, 5, dt);

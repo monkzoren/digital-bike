@@ -49,4 +49,7 @@ export default __t.row({
   botSkill: __t.u8().name("bot_skill"),
   topV: __t.f32().name("top_v"),
   tricksDone: __t.u16().name("tricks_done"),
+  driftDir: __t.i8().name("drift_dir"),
+  driftCharge: __t.u16().name("drift_charge"),
+  grindTicks: __t.u16().name("grind_ticks"),
 });

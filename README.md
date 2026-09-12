@@ -31,11 +31,28 @@ client/  (Vite + TS, Three.js)            spacetimedb/  (TypeScript module)
   down the slope, drag, grip and slip, jumps, tricks, landings, crashes,
   drafting, placings — so nobody can cheat their way down the hill.
 - **Controls:** stick/**WASD** up to tuck and pedal, down to brake (and in the
-  air, to bring the nose up), left/right to steer — hold it past the grip
-  limit and the bike **drifts**. **HOP** (Space/J/gamepad A) bunny-hops and,
-  on a kicker lip, *times your launch*. **TRICK** (K/Shift/B) held in the air
-  with a direction throws a whip, flip, superman or tailwhip. **BOOST**
-  (L/Ctrl/X) spends the meter.
+  air, to bring the nose up), left/right to steer. Steering is **analog** — a
+  gamepad stick gives you the shallow corrections a racer lives on, and on the
+  keyboard the lock ramps in as you hold, so a tap is a nudge. **HOP**
+  (Space/J/gamepad A) bunny-hops, and on a kicker lip it *times your launch*.
+  **HOP held with the bars turned is a DRIFT** (below). **TRICK** (K/Shift/B)
+  held in the air with a direction throws a whip, flip, superman or tailwhip.
+  **BOOST** (L/Ctrl/X) spends the meter.
+- **Drift and mini-turbo.** Hold HOP into a corner with the bars turned and
+  the bike hangs out sideways, turning far tighter than grip allows. The
+  longer you hold it the more the mini-turbo charges — blue, orange, purple,
+  shown live on the boost gauge — and **letting go** cashes it in for an
+  instant shove. The drift ends when you release the button, not when the
+  stick crosses centre, so the slide is something you commit to. Tight
+  corners are genuinely faster drifted; open ones are not.
+- **Grinding.** Felled trunks lie down the fall line in the forest. Get up on
+  one and you *grind* it: the trunk holds your line, pushes you along, and
+  pays boost the whole way. Hop off the end cleanly for a bonus.
+- **Knocks, not wrecks.** Trunks lying across the track, straw bales along the
+  corridor and a clipped boulder **bonk** you — slowed, spun, still riding.
+  Ordinary landings never put you down either, however ugly: they cost speed.
+  Two things still wreck you outright — a boulder taken at pace, and bailing
+  out of a trick you committed to. Both are things you chose.
 - **Timing is the skill.** Press HOP right on the lip of a kicker for a
   perfect pop (and a boost bonus); press the throttle exactly as the gate
   drops for a **holeshot** (early is a jump start, and it costs you). Land
@@ -45,6 +62,9 @@ client/  (Vite + TS, Three.js)            spacetimedb/  (TypeScript module)
   and drafting fill the meter; spending it raises acceleration and top speed.
   Crashing empties it. Every corner is "how close to the edge do I want to
   ride".
+- **Track furniture.** Kickers to time, whoops that buck you, gates that
+  pinch, boost pads, boulders to read, standing water that takes your grip,
+  trunks to hop or to grind, and baled corners you can throw the bike at.
 - **Six biomes, five hills.** Each biome has its own grip, rolling resistance,
   corridor width, hazards and look — snow is fast and slidey, forest is tight
   and high-grip, mud is the loosest surface on the mountain, dunes drag at
@@ -135,7 +155,15 @@ on the start gate and tells you nothing.
 - **The track generator is duplicated on purpose** — the block at the top of
   `spacetimedb/src/index.ts` and `client/src/track.ts` must produce identical
   segments from the same `(courseId, seed)`. Only those two numbers go on the
-  wire; everything else is rebuilt on both sides. Keep them in sync.
+  wire; everything else is rebuilt on both sides. Keep them in sync, and prove
+  it after touching either one:
+
+  ```bash
+  cd client && npx tsx ../tools/check-track-sync.mts
+  ```
+
+  It rebuilds every course at seven seeds on both sides and compares every
+  field. A drift here is invisible on screen and ruins the race.
 - **SpacetimeDB is a disposable game engine.** Rooms, races and standings die
   with the room that owns them, and the database is expected to be wiped on a
   breaking schema change. The `profiles` service (see `profiles/README.md`)

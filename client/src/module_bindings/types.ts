@@ -145,6 +145,9 @@ export const Player = __t.object("Player", {
   botSkill: __t.u8(),
   topV: __t.f32(),
   tricksDone: __t.u16(),
+  driftDir: __t.i8(),
+  driftCharge: __t.u16(),
+  grindTicks: __t.u16(),
 });
 export type Player = __Infer<typeof Player>;
 

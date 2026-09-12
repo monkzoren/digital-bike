@@ -12,6 +12,9 @@ deliberately left for later. Key facts:
   and draws riders; `src/main.ts` owns connection, input and UI state.
 - After editing the module: `spacetime publish -y` then regenerate bindings:
   `spacetime generate --lang typescript --out-dir client/src/module_bindings --module-path spacetimedb -y`
+- `tools/check-track-sync.mts` PROVES the two track generators agree — run it
+  (`cd client && npx tsx ../tools/check-track-sync.mts`) after touching
+  either one.
 - THE TRACK GENERATOR IS DUPLICATED, and it is the one thing that must stay
   in lockstep: the block at the top of `spacetimedb/src/index.ts` and
   `client/src/track.ts` must produce identical segments from the same
@@ -24,6 +27,21 @@ deliberately left for later. Key facts:
   renderer converts with `trackPoint()`; the lateral axis is the LEFT normal
   (`lateral()`), and its sign has to match the module's `n += v·sin(yaw)` or
   every corner is mirrored.
+- Handling is deliberately TIGHT: the rider's steering input is clamped to
+  the turn the tyres actually have left once the corner has taken its share
+  (`turnBudget`), so the bike never slides around underneath you. A slide is
+  something you ASK for — hold HOP with the bars turned and you drift, which
+  rotates `DRIFT_TURN`x tighter than grip allows and charges a mini-turbo you
+  cash by releasing the button. Two numbers govern whether drifting is worth
+  doing at all: `GRIP_ACCEL` (how tight a corner grip alone can take) and the
+  `MINI_TURBO`/`DRIFT_SCRUB` pair. Both were set by MEASURING laps with
+  `client/harness-lap.mjs` — with grip too high, drifting was slower than not
+  bothering. Re-measure both `drift` and `nodrift` after touching them.
+- An ordinary landing never crashes you, it costs speed; only a boulder at
+  pace or a bailed trick puts you on the floor. Minor contacts `bonk`
+  (slowed and spun, still riding) rather than crash. Measuring showed twelve
+  of fourteen crashes per lap were landings, which is a racer that stops
+  being a racer.
 - Physics constants live in the module; `client/src/config.ts` mirrors only
   what the HUD needs. Bot difficulty rides one continuous skill dial (0..120
   — EASY 40 · NORMAL 80 · HARD 120; `lobby.botSkill` 255 = derive from

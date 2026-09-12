@@ -50,6 +50,15 @@ export const FX_LAND_OK = 3;
 export const FX_TRICK = 4;
 export const FX_BOOSTPAD = 5;
 export const FX_KICKER = 6;
+export const FX_MINI_TURBO = 7;
+export const FX_GRIND = 8;
+export const FX_BONK = 9;
+export const FX_SPLASH = 10;
+
+// Drift charge tiers — mirror DRIFT_TIERS in spacetimedb/src/index.ts. The
+// HUD colours the boost bar by the tier the slide has reached.
+export const DRIFT_TIERS = [360, 780, 1350];
+export const DRIFT_TIER_COLORS = ['#35c8ff', '#ffa023', '#c46bff'];
 
 export const TRICK_NAMES = ['', 'WHIP', 'FLIP', 'SUPERMAN', 'TAILWHIP'];
 
