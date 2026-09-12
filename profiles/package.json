@@ -1,0 +1,9 @@
+{
+  "name": "digital-bike-profiles",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Keeps player progression in SQLite so SpacetimeDB can be wiped freely.",
+  "main": "index.mjs",
+  "scripts": { "start": "node index.mjs" }
+}
