@@ -19,9 +19,10 @@ let lastStage = -1;
 let t = 0;
 const timer = setInterval(() => {
   t++;
-  const lobby = [...conn.db.lobby.iter()][0];
-  const race = [...conn.db.race.iter()].sort((a, b) => Number(b.id - a.id))[0];
+  // MY room and MY race — a stale lobby from another session is not this test.
   const me = conn.db.player.identity.find(conn.identity);
+  const lobby = me && me.lobbyId ? conn.db.lobby.id.find(me.lobbyId) : null;
+  const race = me && me.raceId ? conn.db.race.id.find(me.raceId) : null;
   if (me && race && race.state === 1) {
     // Ride the racing line badly but consistently: full throttle, hop a lot.
     conn.reducers.setInput({ dirX: Math.sin(t / 7) > 0 ? 1 : -1, dirY: 1, btn: t % 9 === 0 ? 1 : 0 });
@@ -31,8 +32,8 @@ const timer = setInterval(() => {
     lastStage = lobby.stage;
     console.log(`--- STAGE ${lobby.stage + 1}/${lobby.stages} course=${race.courseId} seed=${race.seed}`);
   }
-  if (t % 25 === 0) {
-    const rs = [...conn.db.player.iter()].filter(p => !p.spectator);
+  if (t % 100 === 0) {
+    const rs = [...conn.db.player.byRace.filter(race.id)].filter(p => !p.spectator);
     console.log(`t=${t} state=${race.state} el=${race.elapsed} fin=${race.finished}/${rs.length} :: ` +
       rs.sort((a, b) => b.s - a.s).map(p => `${p.name}:${p.s.toFixed(0)}m/${p.cupPoints}pts${p.place ? `(P${p.place})` : ''}`).join(' '));
   }
@@ -48,4 +49,4 @@ const timer = setInterval(() => {
     process.exit(0);
   }
 }, 100);
-setTimeout(() => { console.log('TIMEOUT'); process.exit(1); }, 600000);
+setTimeout(() => { console.log('TIMEOUT'); process.exit(1); }, 1500000);

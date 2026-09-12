@@ -1757,15 +1757,25 @@ function finishRace(ctx: Ctx, race: RaceRow) {
   ctx.db.lobby.id.update({ ...lobby, status: L_FINISHED, championName });
 }
 
-// A cup runs different hills each leg, and only ones the host can ride.
+// A cup runs a different hill every leg. It draws from what the host has
+// unlocked, but a cup is also where you SEE the mountain: if they own fewer
+// hills than the cup has legs, it opens the next ones up for the occasion
+// rather than running the same hill three times.
 function pickCupCourse(ctx: Ctx, lobby: LobbyRow, stage: number): number {
   const acc = accountOf(ctx, lobby.hostId);
   const open: number[] = [];
   for (let i = 0; i < COURSE_COUNT; i++) if (courseUnlocked(acc, i)) open.push(i);
+  for (let i = 0; i < COURSE_COUNT && open.length < lobby.stages; i++) {
+    if (!open.includes(i)) open.push(i);
+  }
   if (open.length === 0) return 0;
   const rng = makeRng(rollSeed(ctx, stage * 5171));
-  const pick = open[Math.floor(rng() * open.length)];
-  return pick === lobby.courseId && open.length > 1 ? open[(open.indexOf(pick) + 1) % open.length] : pick;
+  let pick = open[Math.floor(rng() * open.length)];
+  // Never the same hill twice running.
+  if (pick === lobby.courseId && open.length > 1) {
+    pick = open[(open.indexOf(pick) + 1) % open.length];
+  }
+  return pick;
 }
 
 // ---------------------------------------------------------------------------
